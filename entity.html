@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ENTITY - Board Game</title>
+    <style>
+        :root {
+            --bg-color: #1a1a24;
+            --board-dark: #2d2d3a;
+            --board-light: #3e3e4f;
+            --red-team: #ff4a5a;
+            --blue-team: #3b82f6;
+            --throne-color: #ffd700;
+            --diamond-color: #a855f7;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin: 0 0 5px 0;
+            letter-spacing: 3px;
+            font-size: 2.5rem;
+            text-shadow: 0 0 10px rgba(255,255,255,0.2);
+        }
+
+        #status {
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            font-weight: 600;
+            min-height: 28px;
+        }
+
+        .red-turn { color: var(--red-team); }
+        .blue-turn { color: var(--blue-team); }
+
+        #board-container {
+            position: relative;
+            background: #111;
+            padding: 12px;
+            border-radius: 12px;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.5);
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(7, 65px);
+            grid-template-rows: repeat(7, 65px);
+            gap: 2px;
+            background-color: #111;
+        }
+
+        .cell {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            font-weight: bold;
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s;
+        }
+
+        /* Checkerboard pattern */
+        .cell.dark { background-color: var(--board-dark); }
+        .cell.light { background-color: var(--board-light); }
+
+        /* Highlight special squares */
+        .cell.throne {
+            box-shadow: inset 0 0 15px rgba(255, 215, 0, 0.4);
+            border: 1px gold dashed;
+        }
+        .cell.throne::before {
+            content: "👑";
+            position: absolute;
+            font-size: 0.8rem;
+            bottom: 2px;
+            opacity: 0.7;
+        }
+
+        /* Selection and Moves */
+        .cell.selected {
+            background-color: #555577 !important;
+            box-shadow: inset 0 0 10px #fff;
+        }
+        .cell.valid-move::after {
+            content: "";
+            width: 16px;
+            height: 16px;
+            background-color: rgba(255, 255, 255, 0.4);
+            border-radius: 50%;
+            position: absolute;
+            pointer-events: none;
+        }
+        .cell.valid-jump {
+            background-color: rgba(239, 68, 68, 0.4) !important;
+        }
+
+        /* Pieces */
+        .piece {
+            width: 80%;
+            height: 80%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            transition: transform 0.2s;
+            z-index: 2;
+        }
+        .piece:hover {
+            transform: scale(1.08);
+        }
+
+        .piece.red { color: var(--red-team); }
+        .piece.blue { color: var(--blue-team); }
+        
+        .piece.diamond {
+            color: var(--diamond-color) !important;
+            filter: drop-shadow(0 0 5px rgba(168, 85, 247, 0.6));
+        }
+
+        /* Overlay Screens */
+        #screen {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 10;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+        #screen h2 { font-size: 3rem; margin-bottom: 20px; }
+        #screen button {
+            padding: 12px 30px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            background: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        #screen button:hover { transform: scale(1.05); }
+    </style>
+</head>
+<body>
+
+    <h1>ENTITY</h1>
+    <div id="status">Loading game...</div>
+
+    <div id="board-container">
+        <div id="board"></div>
+    </div>
+
+    <div id="screen">
+        <h2 id="win-message">Red Wins!</h2>
+        <button onclick="initGame()">Play Again</button>
+    </div>
+
+    <script>
+        const BOARD_SIZE = 7;
+        let boardState = [];
+        let currentTurn = 'red'; // 'red' or 'blue'
+        let selectedSquare = null;
+        let validActions = []; // tracks valid target indices {row, col, type, jumpOver}
+
+        const boardElement = document.getElementById('board');
+        const statusElement = document.getElementById('status');
+        const screenElement = document.getElementById('screen');
+        const winMessageElement = document.getElementById('win-message');
+
+        function initGame() {
+            screenElement.style.display = 'none';
+            currentTurn = 'red';
+            selectedSquare = null;
+            validActions = [];
+            boardState = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
+
+            // Set up Player 1 (Red) - Row 0 & 1 from array perspective
+            // Row 0 (Back line): X at corners, alternating
+            // D1 (index 0,3) is Throne
+            for(let c=0; c<BOARD_SIZE; c++) {
+                let type = (c % 2 === 0) ? 'X' : '+';
+                if (c === 3) type = 'D'; // Placeholder for setup, turned to King/Throne logic
+                boardState[0][c] = { team: 'red', type: type };
+            }
+            // Row 1 (Front line): Shifted layout (+ at corners)
+            for(let c=0; c<BOARD_SIZE; c++) {
+                let type = (c % 2 === 0) ? '+' : 'X';
+                boardState[1][c] = { team: 'red', type: type };
+            }
+
+            // Correct specific special positions for Red
+            boardState[0][3] = { team: 'red', type: 'X' }; // Restoring underlying piece type
+            boardState[1][3] = { team: 'red', type: 'diamond' }; // Diamond on front line center
+
+            // Set up Player 2 (Blue) - Row 5 & 6 from array perspective
+            // Row 5 (Front line): X at corners
+            for(let c=0; c<BOARD_SIZE; c++) {
+                let type = (c % 2 === 0) ? 'X' : '+';
+                boardState[5][c] = { team: 'blue', type: type };
+            }
+            // Row 6 (Back line): Staggered layout (+ at corners)
+            for(let c=0; c<BOARD_SIZE; c++) {
+                let type = (c % 2 === 0) ? '+' : 'X';
+                boardState[6][c] = { team: 'blue', type: type };
+            }
+
+            // Correct specific special positions for Blue
+            boardState[5][3] = { team: 'blue', type: 'diamond' }; // Diamond on front line center
+
+            renderBoard();
+            updateStatus();
+        }
+
+        function renderBoard() {
+            boardElement.innerHTML = '';
+            // Render from row 6 down to 0 so Red is at bottom of screen
+            for (let r = BOARD_SIZE - 1; r >= 0; r--) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    cell.classList.add((r + c) % 2 === 0 ? 'dark' : 'light');
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+
+                    // Throne visual check
+                    if ((r === 0 && c === 3) || (r === 6 && c === 3)) {
+                        cell.classList.add('throne');
+                    }
+
+                    // Selection highlight
+                    if (selectedSquare && selectedSquare.row === r && selectedSquare.col === c) {
+                        cell.classList.add('selected');
+                    }
+
+                    // Valid move indicators
+                    const action = validActions.find(a => a.row === r && a.col === c);
+                    if (action) {
+                        if (action.type === 'move') cell.classList.add('valid-move');
+                        if (action.type === 'jump') cell.classList.add('valid-jump');
+                    }
+
+                    // Draw pieces
+                    const pieceData = boardState[r][c];
+                    if (pieceData) {
+                        const piece = document.createElement('div');
+                        piece.classList.add('piece', pieceData.team, pieceData.type);
+                        
+                        if (pieceData.type === 'X') piece.textContent = '✕';
+                        else if (pieceData.type === '+') piece.textContent = '＋';
+                        else if (pieceData.type === 'diamond') piece.textContent = '◆';
+
+                        cell.appendChild(piece);
+                    }
+
+                    cell.addEventListener('click', () => handleCellClick(r, c));
+                    boardElement.appendChild(cell);
+                }
+            }
+        }
+
+        function updateStatus() {
+            statusElement.className = currentTurn === 'red' ? 'red-turn' : 'blue-turn';
+            statusElement.textContent = `${currentTurn.toUpperCase()}'s Turn - Move your pieces`;
+        }
+
+        function handleCellClick(row, col) {
+            const clickedAction = validActions.find(a => a.row === row && a.col === col);
+
+            if (clickedAction) {
+                executeAction(clickedAction);
+                return;
+            }
+
+            // Selection Phase
+            const piece = boardState[row][col
